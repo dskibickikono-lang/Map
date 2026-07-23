@@ -1,12 +1,6 @@
 'use client';
 
 import { geoMercator, geoPath } from 'd3-geo';
-import type {
-  Feature,
-  FeatureCollection,
-  GeoJsonProperties,
-  Geometry,
-} from 'geojson';
 import { Lock, MapPin, MousePointer2, RotateCcw, Unlock } from 'lucide-react';
 import {
   useEffect,
@@ -14,7 +8,7 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 
 import {
@@ -22,9 +16,11 @@ import {
   capitalizePolishName,
   countAssignments,
   formatPolishDate,
+  isRegionCollection,
   parseSessionAssignments,
   validateEditPassword,
   type Assignments,
+  type RegionCollection,
   type Salesperson,
 } from './mapLogic';
 
@@ -67,43 +63,6 @@ const DEFAULT_ASSIGNMENTS: Record<string, Salesperson> = {
 
 const MAP_SESSION_KEY = 'apt_calc_map_assignments';
 
-type RegionProperties = GeoJsonProperties & {
-  nazwa: string;
-};
-
-type RegionFeature = Feature<Geometry, RegionProperties>;
-type RegionCollection = FeatureCollection<Geometry, RegionProperties>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isRegionFeature(value: unknown): value is RegionFeature {
-  if (!isRecord(value) || value.type !== 'Feature') {
-    return false;
-  }
-
-  const { geometry, properties } = value;
-  return (
-    isRecord(geometry) &&
-    (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') &&
-    Array.isArray(geometry.coordinates) &&
-    isRecord(properties) &&
-    typeof properties.nazwa === 'string' &&
-    properties.nazwa.length > 0
-  );
-}
-
-function isRegionCollection(value: unknown): value is RegionCollection {
-  return (
-    isRecord(value) &&
-    value.type === 'FeatureCollection' &&
-    Array.isArray(value.features) &&
-    value.features.length > 0 &&
-    value.features.every(isRegionFeature)
-  );
-}
-
 function logStorageError(operation: string, error: unknown): void {
   const errorType = error instanceof DOMException ? error.name : 'nieznany błąd';
   console.error(`Nie udało się ${operation} przypisań w sesji (${errorType}).`);
@@ -126,7 +85,10 @@ export const MapTab: React.FC = () => {
   const [passwordInput, setPasswordInput] = useState('');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
+  const [passwordAttempt, setPasswordAttempt] = useState(0);
   const skipNextSaveRef = useRef(false);
+  const passwordModalRef = useRef<HTMLDivElement>(null);
+  const unlockButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -214,7 +176,7 @@ export const MapTab: React.FC = () => {
   }
 
   function handleRegionKeyDown(
-    event: KeyboardEvent<SVGPathElement>,
+    event: ReactKeyboardEvent<SVGPathElement>,
     regionName: string,
   ): void {
     if (!isEditMode || (event.key !== 'Enter' && event.key !== ' ')) {
@@ -228,6 +190,7 @@ export const MapTab: React.FC = () => {
   function openPasswordModal(): void {
     setPasswordInput('');
     setPasswordError(false);
+    setPasswordAttempt(0);
     setShowPasswordModal(true);
   }
 
@@ -235,6 +198,7 @@ export const MapTab: React.FC = () => {
     setShowPasswordModal(false);
     setPasswordInput('');
     setPasswordError(false);
+    setPasswordAttempt(0);
   }
 
   function handlePasswordSubmit(event: FormEvent<HTMLFormElement>): void {
@@ -242,6 +206,7 @@ export const MapTab: React.FC = () => {
 
     if (!validateEditPassword(passwordInput)) {
       setPasswordError(true);
+      setPasswordAttempt((attempt) => attempt + 1);
       return;
     }
 
@@ -267,6 +232,56 @@ export const MapTab: React.FC = () => {
       logStorageError('usunąć', error);
     }
   }
+
+  useEffect(() => {
+    if (!showPasswordModal) {
+      return;
+    }
+
+    function handleModalKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowPasswordModal(false);
+        setPasswordInput('');
+        setPasswordError(false);
+        setPasswordAttempt(0);
+        return;
+      }
+
+      if (event.key !== 'Tab' || passwordModalRef.current === null) {
+        return;
+      }
+
+      const focusableElements =
+        passwordModalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements.item(0);
+      const lastElement = focusableElements.item(
+        focusableElements.length - 1,
+      );
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleModalKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleModalKeyDown);
+      unlockButtonRef.current?.focus();
+    };
+  }, [showPasswordModal]);
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 text-white md:px-8 md:py-10">
@@ -382,6 +397,7 @@ export const MapTab: React.FC = () => {
                   Najedź na województwo, aby sprawdzić aktualne przypisanie.
                 </p>
                 <button
+                  ref={unlockButtonRef}
                   type="button"
                   onClick={openPasswordModal}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#c0a068] px-4 py-3 text-sm font-semibold text-[#161615] transition hover:bg-[#d1b47e] focus:outline-none focus:ring-2 focus:ring-white"
@@ -560,15 +576,14 @@ export const MapTab: React.FC = () => {
           role="presentation"
         >
           <div
+            ref={passwordModalRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="password-modal-title"
             aria-describedby={
               passwordError ? 'password-error' : 'password-modal-description'
             }
-            className={`w-full max-w-md rounded-2xl border border-white/10 bg-[#1D1D1B] p-6 shadow-2xl sm:p-8 ${
-              passwordError ? 'animate-shake' : ''
-            }`}
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1D1D1B] p-6 shadow-2xl sm:p-8"
           >
             <h2
               id="password-modal-title"
@@ -591,6 +606,7 @@ export const MapTab: React.FC = () => {
                 Hasło
               </label>
               <input
+                key={passwordAttempt}
                 id="map-edit-password"
                 type="password"
                 value={passwordInput}
@@ -605,7 +621,9 @@ export const MapTab: React.FC = () => {
                 aria-describedby={
                   passwordError ? 'password-error' : undefined
                 }
-                className="w-full rounded-xl border border-white/10 bg-[#232322] px-4 py-3 text-white outline-none transition placeholder:text-[#6f6f6e] focus:border-[#c0a068] focus:ring-2 focus:ring-[#c0a068]/30"
+                className={`w-full rounded-xl border border-white/10 bg-[#232322] px-4 py-3 text-white outline-none transition placeholder:text-[#6f6f6e] focus:border-[#c0a068] focus:ring-2 focus:ring-[#c0a068]/30 ${
+                  passwordError ? 'animate-shake' : ''
+                }`}
               />
 
               <div className="mt-2 min-h-5" aria-live="polite">

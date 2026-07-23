@@ -5,6 +5,7 @@ import {
   capitalizePolishName,
   countAssignments,
   formatPolishDate,
+  isRegionCollection,
   parseSessionAssignments,
   validateEditPassword,
   type Assignments,
@@ -14,6 +15,83 @@ const fallbackAssignments: Assignments = {
   pomorskie: 'dawid',
   mazowieckie: 'nikola',
 };
+
+function collectionWithGeometry(geometry: unknown): unknown {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { nazwa: 'pomorskie' },
+        geometry,
+      },
+    ],
+  };
+}
+
+describe('isRegionCollection', () => {
+  it('akceptuje poprawny Polygon', () => {
+    expect(
+      isRegionCollection(
+        collectionWithGeometry({
+          type: 'Polygon',
+          coordinates: [
+            [
+              [18.1, 54.1],
+              [18.7, 54.2],
+              [18.1, 54.1],
+            ],
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('akceptuje poprawny MultiPolygon', () => {
+    expect(
+      isRegionCollection(
+        collectionWithGeometry({
+          type: 'MultiPolygon',
+          coordinates: [
+            [
+              [
+                [18.1, 54.1],
+                [18.7, 54.2],
+                [18.1, 54.1],
+              ],
+            ],
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      'wartość tekstowa',
+      {
+        type: 'Polygon',
+        coordinates: [[[18.1, '54.1']]],
+      },
+    ],
+    [
+      'NaN',
+      {
+        type: 'Polygon',
+        coordinates: [[[18.1, Number.NaN]]],
+      },
+    ],
+    [
+      'pozycja krótsza niż dwie współrzędne',
+      {
+        type: 'Polygon',
+        coordinates: [[[18.1]]],
+      },
+    ],
+  ])('odrzuca niepoprawne współrzędne: %s', (_caseName, geometry) => {
+    expect(isRegionCollection(collectionWithGeometry(geometry))).toBe(false);
+  });
+});
 
 describe('validateEditPassword', () => {
   it('akceptuje dokładnie hasło qwer', () => {
@@ -59,6 +137,30 @@ describe('parseSessionAssignments', () => {
 
     expect(result).toEqual(fallbackAssignments);
     expect(result).not.toBe(fallbackAssignments);
+  });
+
+  it('ignoruje klucze spoza fallbacku', () => {
+    expect(
+      parseSessionAssignments(
+        '{"pomorskie":"magda","mazowieckie":"nikola","fikcyjne":"dawid"}',
+        fallbackAssignments,
+      ),
+    ).toEqual({
+      pomorskie: 'magda',
+      mazowieckie: 'nikola',
+    });
+  });
+
+  it('uzupełnia brakujący klucz wartością z fallbacku', () => {
+    expect(
+      parseSessionAssignments(
+        '{"pomorskie":"magda"}',
+        fallbackAssignments,
+      ),
+    ).toEqual({
+      pomorskie: 'magda',
+      mazowieckie: 'nikola',
+    });
   });
 });
 
