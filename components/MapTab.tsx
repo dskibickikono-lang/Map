@@ -75,8 +75,45 @@ const SALESPERSON_IDS = Object.keys(
   SALESPERSON_COLORS,
 ) as Salesperson[];
 
+type BoundaryCollection = {
+  type: 'FeatureCollection';
+  features: Array<{
+    type: 'Feature';
+    geometry: RegionCollection['features'][number]['geometry'];
+  }>;
+};
+
+function isBoundaryCollection(value: unknown): value is BoundaryCollection {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('type' in value) ||
+    value.type !== 'FeatureCollection' ||
+    !('features' in value) ||
+    !Array.isArray(value.features)
+  ) {
+    return false;
+  }
+
+  return value.features.every(
+    (feature) =>
+      typeof feature === 'object' &&
+      feature !== null &&
+      'type' in feature &&
+      feature.type === 'Feature' &&
+      'geometry' in feature &&
+      typeof feature.geometry === 'object' &&
+      feature.geometry !== null &&
+      'type' in feature.geometry &&
+      (feature.geometry.type === 'Polygon' ||
+        feature.geometry.type === 'MultiPolygon'),
+  );
+}
+
 export const MapTab: React.FC = () => {
   const [geoData, setGeoData] = useState<RegionCollection | null>(null);
+  const [voivodeshipData, setVoivodeshipData] =
+    useState<BoundaryCollection | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [activeBrush, setActiveBrush] = useState<Salesperson>('dawid');
   const [assignments, setAssignments] = useState<Assignments>({});
@@ -143,6 +180,38 @@ export const MapTab: React.FC = () => {
     }
 
     void loadMap();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadVoivodeshipBoundaries(): Promise<void> {
+      try {
+        const response = await fetch('/poland-voivodeships.geojson', {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error('Odpowiedź HTTP ' + response.status);
+        }
+
+        const data: unknown = await response.json();
+        if (!isBoundaryCollection(data)) {
+          throw new Error('Nieprawidłowy format GeoJSON');
+        }
+
+        setVoivodeshipData(data);
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        console.error('Nie udało się załadować granic województw.', error);
+      }
+    }
+
+    void loadVoivodeshipBoundaries();
     return () => controller.abort();
   }, []);
 
@@ -706,6 +775,19 @@ export const MapTab: React.FC = () => {
                     />
                   );
                 })}
+                {voivodeshipData?.features.map((feature, index) => (
+                  <path
+                    key={'voivodeship-boundary-' + index}
+                    d={pathGenerator(feature.geometry) ?? ''}
+                    fill="none"
+                    stroke="#c0a068"
+                    strokeWidth={1.25}
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                  />
+                ))}
                 </g>
               </svg>
               </>
