@@ -13,7 +13,7 @@ This guide provides information for AI agents (including Copilot) working with t
 
 ## Purpose
 
-The **Map** application is an interactive Next.js application that displays a map of Polish voivodeships (provinces) and their assignment to sales representatives (handlowcy). The primary use case is managing and visualizing HR regional sales territories.
+The **Map** application is an interactive Next.js application that displays a map of Polish powiaty (counties) and their assignment to sales representatives (handlowcy). The primary use case is managing and visualizing HR regional sales territories.
 
 ---
 
@@ -30,7 +30,8 @@ Map/
 │   ├── mapLogic.ts          # Core map logic and utilities
 │   └── mapLogic.test.ts     # Unit tests for map logic
 ├── public/
-│   └── poland-voivodeships.geojson  # Poland voivodeships GeoJSON
+│   ├── poland-counties.geojson      # Poland powiaty GeoJSON (TERC-keyed)
+│   └── poland-voivodeships.geojson  # Retained comparison GeoJSON
 ├── next.config.js           # Next.js configuration
 ├── package.json             # Dependencies and scripts
 ├── tailwind.config.ts       # Tailwind CSS configuration
@@ -42,11 +43,11 @@ Map/
 
 ## Key Features
 
-1. **Preview Mode**: View current voivodeships assignments to sales representatives
-2. **Tooltips**: Display voivodeship name and assigned representative on hover/focus
-3. **Edit Mode**: Assign sales representatives to voivodeships via click or keyboard
+1. **Preview Mode**: View current powiat assignments to sales representatives
+2. **Tooltips**: Display powiat name and TERC code and assigned representative on hover/focus
+3. **Edit Mode**: Assign sales representatives to powiaty via click or keyboard
 4. **Password Protected Editing**: Edit mode requires password `qwer` (client-side UI lock only)
-5. **Statistics Panel**: Shows count of voivodeships assigned to each sales representative
+5. **Statistics Panel**: Shows count of powiaty assigned to each sales representative
 6. **Session Storage**: Changes persist only within current browser session (sessionStorage)
 
 ---
@@ -79,7 +80,7 @@ Map/
 ### Data Storage
 - **Session-based**: Changes are stored in `sessionStorage` and do not persist across browser sessions
 - **No backend**: The application is entirely client-side; there is no API for data persistence
-- **GeoJSON source**: Voivodeships boundaries come from `public/poland-voivodeships.geojson`
+- **GeoJSON source**: Powiat boundaries come from `public/poland-counties.geojson`; assignments are keyed by four-digit TERC codes
 
 ### Security Considerations
 - The password `qwer` for edit mode is **client-side only** and is **not** a security mechanism
@@ -88,7 +89,7 @@ Map/
 
 ### Edit Mode Flow
 1. User enters password `qwer` to unlock edit mode
-2. User clicks on voivodeships or uses keyboard to assign sales representatives
+2. User clicks on powiaty, pans/zooms the map, or uses the county search with a keyboard to assign sales representatives
 3. Changes are saved to `sessionStorage`
 4. A reset button restores default assignments
 5. Closing the browser clears all changes
@@ -123,7 +124,7 @@ Current deployment: https://map-rosy-chi.vercel.app
 - **TypeScript**: Ensure strict typing is maintained
 - **Tests**: Add tests for new `mapLogic.ts` functions
 - **Tailwind**: Use existing Tailwind classes for styling consistency
-- **GeoJSON**: If updating voivodeships data, maintain the GeoJSON format in `public/poland-voivodeships.geojson`
+- **GeoJSON**: If updating powiat data, retain the GeoJSON format and unique `terc`/`name` properties in `public/poland-counties.geojson`
 
 ---
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { geoMercator, geoPath } from 'd3-geo';
-import { Lock, MapPin, MousePointer2, RotateCcw, Unlock } from 'lucide-react';
+import { Lock, MapPin, MousePointer2, RotateCcw, Search, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   useEffect,
   useMemo,
@@ -9,13 +9,16 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 
 import {
   assignSalesperson,
   capitalizePolishName,
   countAssignments,
+  createDefaultAssignments,
   formatPolishDate,
+  hasExpectedPowiatCount,
   isRegionCollection,
   parseSessionAssignments,
   validateEditPassword,
@@ -27,58 +30,93 @@ import {
 export type { Salesperson } from './mapLogic';
 
 const SALESPERSON_COLORS: Record<Salesperson, string> = {
-  dawid: '#4A809E',    // Niebieski (Dopasowany do dark mode)
-  nikola: '#C28340',   // Pomarańczowy
-  magda: '#5E9C57',    // Zielony
-  unassigned: '#2A2A2A' 
+  dawid: '#4A809E',
+  nikola: '#C28340',
+  magda: '#5E9C57',
+  unassigned: '#2A2A2A',
 };
 
 const SALESPERSON_NAMES: Record<Salesperson, string> = {
   dawid: 'Dawid (Iława)',
   nikola: 'Nikola (Iława)',
   magda: 'Magda (Oświęcim)',
-  unassigned: 'Brak przypisania'
+  unassigned: 'Brak przypisania',
 };
 
-const DEFAULT_ASSIGNMENTS: Record<string, Salesperson> = {
-  'zachodniopomorskie': 'dawid',
-  'pomorskie': 'dawid',
-  'lubuskie': 'dawid',
-  'wielkopolskie': 'dawid',
-  'dolnośląskie': 'dawid',
-  'kujawsko-pomorskie': 'dawid',
-  
-  'warmińsko-mazurskie': 'nikola',
-  'podlaskie': 'nikola',
-  'mazowieckie': 'nikola',
-  'lubelskie': 'nikola',
-
-  'łódzkie': 'magda',
-  'świętokrzyskie': 'magda',
-  'opolskie': 'magda',
-  'śląskie': 'magda',
-  'małopolskie': 'magda',
-  'podkarpackie': 'magda'
+const DEFAULT_OWNERS_BY_VOIVODESHIP: Record<string, Salesperson> = {
+  '02': 'dawid',
+  '04': 'dawid',
+  '06': 'nikola',
+  '08': 'dawid',
+  '10': 'magda',
+  '12': 'magda',
+  '14': 'nikola',
+  '16': 'magda',
+  '18': 'magda',
+  '20': 'nikola',
+  '22': 'dawid',
+  '24': 'magda',
+  '26': 'magda',
+  '28': 'nikola',
+  '30': 'dawid',
+  '32': 'dawid',
 };
 
-const MAP_SESSION_KEY = 'apt_calc_map_assignments';
+// The legacy name-keyed voivodeship session schema is intentionally not read.
+// County assignments use stable TERC identifiers and begin from the inherited defaults.
+const MAP_SESSION_KEY = 'apt_calc_map_county_assignments_v1';
 
 function logStorageError(operation: string, error: unknown): void {
   const errorType = error instanceof DOMException ? error.name : 'nieznany błąd';
-  console.error(`Nie udało się ${operation} przypisań w sesji (${errorType}).`);
+  console.error('Nie udało się ' + operation + ' przypisań w sesji (' + errorType + ').');
 }
 
 const SALESPERSON_IDS = Object.keys(
   SALESPERSON_COLORS,
 ) as Salesperson[];
 
+type BoundaryCollection = {
+  type: 'FeatureCollection';
+  features: Array<{
+    type: 'Feature';
+    geometry: RegionCollection['features'][number]['geometry'];
+  }>;
+};
+
+function isBoundaryCollection(value: unknown): value is BoundaryCollection {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('type' in value) ||
+    value.type !== 'FeatureCollection' ||
+    !('features' in value) ||
+    !Array.isArray(value.features)
+  ) {
+    return false;
+  }
+
+  return value.features.every(
+    (feature) =>
+      typeof feature === 'object' &&
+      feature !== null &&
+      'type' in feature &&
+      feature.type === 'Feature' &&
+      'geometry' in feature &&
+      typeof feature.geometry === 'object' &&
+      feature.geometry !== null &&
+      'type' in feature.geometry &&
+      (feature.geometry.type === 'Polygon' ||
+        feature.geometry.type === 'MultiPolygon'),
+  );
+}
+
 export const MapTab: React.FC = () => {
   const [geoData, setGeoData] = useState<RegionCollection | null>(null);
+  const [voivodeshipData, setVoivodeshipData] =
+    useState<BoundaryCollection | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [activeBrush, setActiveBrush] = useState<Salesperson>('dawid');
-  const [assignments, setAssignments] = useState<Assignments>({
-    ...DEFAULT_ASSIGNMENTS,
-  });
+  const [assignments, setAssignments] = useState<Assignments>({});
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -86,35 +124,57 @@ export const MapTab: React.FC = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [passwordAttempt, setPasswordAttempt] = useState(0);
-  const skipNextSaveRef = useRef(false);
+  const [countyQuery, setCountyQuery] = useState('');
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const passwordModalRef = useRef<HTMLDivElement>(null);
   const unlockButtonRef = useRef<HTMLButtonElement>(null);
+  const dragStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const didDragRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadMap(): Promise<void> {
       try {
-        const response = await fetch('/poland-voivodeships.geojson', {
+        const response = await fetch('/poland-counties.geojson', {
           signal: controller.signal,
         });
 
         if (!response.ok) {
-          throw new Error(`Odpowiedź HTTP ${response.status}`);
+          throw new Error('Odpowiedź HTTP ' + response.status);
         }
 
         const data: unknown = await response.json();
-        if (!isRegionCollection(data)) {
+        if (!isRegionCollection(data) || !hasExpectedPowiatCount(data)) {
           throw new Error('Nieprawidłowy format GeoJSON');
         }
 
+        const defaults = createDefaultAssignments(
+          data,
+          DEFAULT_OWNERS_BY_VOIVODESHIP,
+        );
         setGeoData(data);
+
+        try {
+          setAssignments(
+            parseSessionAssignments(
+              sessionStorage.getItem(MAP_SESSION_KEY),
+              defaults,
+            ),
+          );
+        } catch (error: unknown) {
+          logStorageError('odczytać', error);
+          setAssignments(defaults);
+        } finally {
+          setStorageReady(true);
+        }
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return;
         }
 
-        console.error('Nie udało się załadować mapy województw.');
+        console.error('Nie udało się załadować mapy powiatów.', error);
         setMapError('Nie udało się załadować mapy.');
       }
     }
@@ -124,26 +184,39 @@ export const MapTab: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    try {
-      const storedValue = sessionStorage.getItem(MAP_SESSION_KEY);
-      setAssignments(
-        parseSessionAssignments(storedValue, DEFAULT_ASSIGNMENTS),
-      );
-    } catch (error: unknown) {
-      logStorageError('odczytać', error);
-      setAssignments({ ...DEFAULT_ASSIGNMENTS });
-    } finally {
-      setStorageReady(true);
+    const controller = new AbortController();
+
+    async function loadVoivodeshipBoundaries(): Promise<void> {
+      try {
+        const response = await fetch('/poland-voivodeships.geojson', {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error('Odpowiedź HTTP ' + response.status);
+        }
+
+        const data: unknown = await response.json();
+        if (!isBoundaryCollection(data)) {
+          throw new Error('Nieprawidłowy format GeoJSON');
+        }
+
+        setVoivodeshipData(data);
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        console.error('Nie udało się załadować granic województw.', error);
+      }
     }
+
+    void loadVoivodeshipBoundaries();
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
     if (!storageReady) {
-      return;
-    }
-
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
       return;
     }
 
@@ -164,27 +237,123 @@ export const MapTab: React.FC = () => {
   }, [geoData]);
 
   const currentDate = formatPolishDate(new Date());
+  const defaultAssignments = useMemo(
+    () =>
+      geoData === null
+        ? {}
+        : createDefaultAssignments(geoData, DEFAULT_OWNERS_BY_VOIVODESHIP),
+    [geoData],
+  );
+  const hoveredFeature = useMemo(
+    () =>
+      geoData?.features.find(
+        (feature) => feature.properties.terc === hoveredRegion,
+      ) ?? null,
+    [geoData, hoveredRegion],
+  );
+  const hoveredOwner: Salesperson =
+    hoveredRegion === null
+      ? 'unassigned'
+      : assignments[hoveredRegion] ?? 'unassigned';
+  const matchingRegions = useMemo(() => {
+    const query = countyQuery.trim().toLocaleLowerCase('pl-PL');
+    if (query.length === 0 || geoData === null) {
+      return [];
+    }
 
-  function updateRegion(regionName: string): void {
+    return geoData.features
+      .filter(({ properties }) =>
+        (properties.name + ' ' + properties.terc)
+          .toLocaleLowerCase('pl-PL')
+          .includes(query),
+      )
+      .slice(0, 8);
+  }, [countyQuery, geoData]);
+
+  function updateRegion(regionId: string): void {
     if (!isEditMode) {
       return;
     }
 
     setAssignments((current) =>
-      assignSalesperson(current, regionName, activeBrush),
+      assignSalesperson(current, regionId, activeBrush),
     );
   }
 
   function handleRegionKeyDown(
     event: ReactKeyboardEvent<SVGPathElement>,
-    regionName: string,
+    regionId: string,
   ): void {
     if (!isEditMode || (event.key !== 'Enter' && event.key !== ' ')) {
       return;
     }
 
     event.preventDefault();
-    updateRegion(regionName);
+    updateRegion(regionId);
+  }
+
+  function selectRegionFromSearch(regionId: string): void {
+    setHoveredRegion(regionId);
+    updateRegion(regionId);
+  }
+
+  function getSvgPoint(event: ReactPointerEvent<SVGSVGElement>): {
+    x: number;
+    y: number;
+  } {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * 700,
+      y: ((event.clientY - bounds.top) / bounds.height) * 700,
+    };
+  }
+
+  function handleMapPointerDown(event: ReactPointerEvent<SVGSVGElement>): void {
+    if (zoom === 1) {
+      return;
+    }
+
+    const point = getSvgPoint(event);
+    didDragRef.current = false;
+    dragStartRef.current = { x: point.x, y: point.y, panX: pan.x, panY: pan.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleMapPointerMove(event: ReactPointerEvent<SVGSVGElement>): void {
+    const dragStart = dragStartRef.current;
+    if (dragStart === null) {
+      return;
+    }
+
+    const point = getSvgPoint(event);
+    if (Math.abs(point.x - dragStart.x) > 3 || Math.abs(point.y - dragStart.y) > 3) {
+      didDragRef.current = true;
+    }
+
+    const maxPan = (zoom - 1) * 350;
+    setPan({
+      x: Math.max(-maxPan, Math.min(maxPan, dragStart.panX + point.x - dragStart.x)),
+      y: Math.max(-maxPan, Math.min(maxPan, dragStart.panY + point.y - dragStart.y)),
+    });
+  }
+
+  function handleMapPointerEnd(event: ReactPointerEvent<SVGSVGElement>): void {
+    dragStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function changeZoom(amount: number): void {
+    setZoom((current) => Math.max(1, Math.min(3, current + amount)));
+    if (zoom + amount <= 1) {
+      setPan({ x: 0, y: 0 });
+    }
+  }
+
+  function resetViewport(): void {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   }
 
   function openPasswordModal(): void {
@@ -223,14 +392,7 @@ export const MapTab: React.FC = () => {
       return;
     }
 
-    skipNextSaveRef.current = true;
-    setAssignments({ ...DEFAULT_ASSIGNMENTS });
-
-    try {
-      sessionStorage.removeItem(MAP_SESSION_KEY);
-    } catch (error: unknown) {
-      logStorageError('usunąć', error);
-    }
+    setAssignments({ ...defaultAssignments });
   }
 
   useEffect(() => {
@@ -316,7 +478,7 @@ export const MapTab: React.FC = () => {
                   Edycja przypisań
                 </h2>
                 <p className="mb-6 text-sm leading-relaxed text-[#A4A4A3]">
-                  Wybierz handlowca, a następnie kliknij województwo na mapie.
+                  Wybierz handlowca, a następnie kliknij powiat na mapie.
                 </p>
 
                 <div className="space-y-3" aria-label="Wybór handlowca">
@@ -394,7 +556,7 @@ export const MapTab: React.FC = () => {
                   Podział regionów
                 </h2>
                 <p className="mb-6 text-sm leading-relaxed text-[#A4A4A3]">
-                  Najedź na województwo, aby sprawdzić aktualne przypisanie.
+                  Najedź na powiat, aby sprawdzić aktualne przypisanie.
                 </p>
                 <button
                   ref={unlockButtonRef}
@@ -412,7 +574,7 @@ export const MapTab: React.FC = () => {
 
           <div className="rounded-2xl border border-white/5 bg-[#232322] p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-8px_rgba(0,0,0,0.5)]">
             <h2 className="mb-3 text-sm font-semibold">
-              Statystyki województw
+              Statystyki powiatów
             </h2>
             <div className="space-y-2">
               {SALESPERSON_IDS.filter(
@@ -439,13 +601,51 @@ export const MapTab: React.FC = () => {
                     aria-label={`${countAssignments(
                       assignments,
                       salesperson,
-                    )} województw`}
+                    )} powiatów`}
                   >
                     {countAssignments(assignments, salesperson)}
                   </span>
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/5 bg-[#232322] p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-8px_rgba(0,0,0,0.5)]">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <Search className="h-4 w-4 text-[#c0a068]" aria-hidden="true" />
+              Wyszukaj powiat
+            </h2>
+            <label htmlFor="county-search" className="sr-only">
+              Nazwa lub kod TERC powiatu
+            </label>
+            <input
+              id="county-search"
+              type="search"
+              value={countyQuery}
+              onChange={(event) => setCountyQuery(event.target.value)}
+              placeholder="Nazwa lub kod TERC..."
+              className="w-full rounded-xl border border-white/10 bg-[#1D1D1B] px-3 py-2 text-sm text-white outline-none placeholder:text-[#6f6f6e] focus:border-[#c0a068] focus:ring-2 focus:ring-[#c0a068]/30"
+            />
+            {countyQuery.trim().length > 0 && (
+              <div className="mt-3 space-y-1" aria-live="polite">
+                {matchingRegions.length === 0 ? (
+                  <p className="text-sm text-[#A4A4A3]">Nie znaleziono powiatu.</p>
+                ) : (
+                  matchingRegions.map(({ properties }) => (
+                    <button
+                      key={properties.terc}
+                      type="button"
+                      onClick={() => selectRegionFromSearch(properties.terc)}
+                      onFocus={() => setHoveredRegion(properties.terc)}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm text-[#A4A4A3] transition hover:bg-white/5 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#c0a068]"
+                    >
+                      <span className="min-w-0 truncate">{capitalizePolishName(properties.name)}</span>
+                      <span className="shrink-0 text-xs text-[#c0a068]">{properties.terc}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -481,27 +681,61 @@ export const MapTab: React.FC = () => {
                 Ładowanie mapy...
               </div>
             ) : (
+              <>
+              <div className="absolute right-2 top-2 z-10 flex gap-2 sm:right-4 sm:top-4" aria-label="Sterowanie mapą">
+                <button
+                  type="button"
+                  onClick={() => changeZoom(0.5)}
+                  className="rounded-lg border border-white/10 bg-[#1D1D1B]/95 p-2 text-[#d1b47e] shadow-lg transition hover:border-[#c0a068] focus:outline-none focus:ring-2 focus:ring-[#c0a068]"
+                  aria-label="Powiększ mapę"
+                >
+                  <ZoomIn className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeZoom(-0.5)}
+                  disabled={zoom === 1}
+                  className="rounded-lg border border-white/10 bg-[#1D1D1B]/95 p-2 text-[#d1b47e] shadow-lg transition hover:border-[#c0a068] focus:outline-none focus:ring-2 focus:ring-[#c0a068] disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Pomniejsz mapę"
+                >
+                  <ZoomOut className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={resetViewport}
+                  disabled={zoom === 1 && pan.x === 0 && pan.y === 0}
+                  className="rounded-lg border border-white/10 bg-[#1D1D1B]/95 px-2 text-xs font-semibold text-[#d1b47e] shadow-lg transition hover:border-[#c0a068] focus:outline-none focus:ring-2 focus:ring-[#c0a068] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reset
+                </button>
+              </div>
               <svg
                 width="100%"
                 height="100%"
                 viewBox="0 0 700 700"
-                className="drop-shadow-lg"
+                className="touch-none drop-shadow-lg"
                 role="group"
-                aria-label="Mapa województw Polski"
+                aria-label="Mapa powiatów Polski. Użyj wyszukiwarki powiatów, aby obsłużyć mapę klawiaturą."
+                onPointerDown={handleMapPointerDown}
+                onPointerMove={handleMapPointerMove}
+                onPointerUp={handleMapPointerEnd}
+                onPointerCancel={handleMapPointerEnd}
               >
+                <g transform={'translate(' + pan.x + ' ' + pan.y + ') translate(350 350) scale(' + zoom + ') translate(-350 -350)'}>
                 {geoData.features.map((feature) => {
-                  const regionName = feature.properties.nazwa;
-                  const owner = assignments[regionName] ?? 'unassigned';
-                  const isHovered = hoveredRegion === regionName;
+                  const regionId = feature.properties.terc;
+                  const regionName = feature.properties.name;
+                  const owner = assignments[regionId] ?? 'unassigned';
+                  const isHovered = hoveredRegion === regionId;
 
                   return (
                     <path
-                      key={regionName}
+                      key={regionId}
                       d={pathGenerator(feature) ?? ''}
                       fill={SALESPERSON_COLORS[owner]}
                       stroke="#161615"
                       strokeWidth={isHovered ? 3 : 1.5}
-                      tabIndex={0}
+                      tabIndex={-1}
                       role={isEditMode ? 'button' : 'img'}
                       aria-label={`${capitalizePolishName(
                         regionName,
@@ -515,18 +749,22 @@ export const MapTab: React.FC = () => {
                       }`}
                       onClick={
                         isEditMode
-                          ? () => updateRegion(regionName)
+                          ? () => {
+                              if (!didDragRef.current) {
+                                updateRegion(regionId);
+                              }
+                            }
                           : undefined
                       }
                       onKeyDown={
                         isEditMode
                           ? (event) =>
-                              handleRegionKeyDown(event, regionName)
+                              handleRegionKeyDown(event, regionId)
                           : undefined
                       }
-                      onMouseEnter={() => setHoveredRegion(regionName)}
+                      onMouseEnter={() => setHoveredRegion(regionId)}
                       onMouseLeave={() => setHoveredRegion(null)}
-                      onFocus={() => setHoveredRegion(regionName)}
+                      onFocus={() => setHoveredRegion(regionId)}
                       onBlur={() => setHoveredRegion(null)}
                       style={{
                         transformOrigin: 'center',
@@ -537,31 +775,45 @@ export const MapTab: React.FC = () => {
                     />
                   );
                 })}
+                {voivodeshipData?.features.map((feature, index) => (
+                  <path
+                    key={'voivodeship-boundary-' + index}
+                    d={pathGenerator(feature.geometry) ?? ''}
+                    fill="none"
+                    stroke="#c0a068"
+                    strokeWidth={1.25}
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                  />
+                ))}
+                </g>
               </svg>
+              </>
             )}
           </div>
 
-          {hoveredRegion !== null && (
+          {hoveredFeature !== null && (
             <div className="pointer-events-none absolute bottom-4 left-4 right-4 z-10 rounded-xl border border-white/10 bg-[#1D1D1B]/95 p-4 shadow-xl backdrop-blur sm:bottom-auto sm:left-auto sm:right-6 sm:top-16 sm:min-w-56">
               <div className="mb-1 text-base font-bold text-white sm:text-lg">
-                {capitalizePolishName(hoveredRegion)}
+                {capitalizePolishName(hoveredFeature.properties.name)}
+              </div>
+              <div className="mb-2 text-xs font-medium tracking-wide text-[#c0a068]">
+                TERC: {hoveredFeature.properties.terc}
               </div>
               <div className="flex items-center gap-2 text-sm text-[#A4A4A3]">
                 <span
                   className="h-3 w-3 rounded-full"
                   style={{
                     backgroundColor:
-                      SALESPERSON_COLORS[
-                        assignments[hoveredRegion] ?? 'unassigned'
-                      ],
+                      SALESPERSON_COLORS[hoveredOwner],
                   }}
                   aria-hidden="true"
                 />
                 <span>
                   {
-                    SALESPERSON_NAMES[
-                      assignments[hoveredRegion] ?? 'unassigned'
-                    ]
+                    SALESPERSON_NAMES[hoveredOwner]
                   }
                 </span>
               </div>
