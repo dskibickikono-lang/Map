@@ -1,6 +1,6 @@
 # Mapa Regionów Handlowych KONO
 
-Aplikacja Next.js prezentująca interaktywną mapę województw Polski i ich przypisanie do handlowców. Projekt korzysta z Next.js 14 oraz App Routera.
+Aplikacja Next.js prezentująca interaktywną mapę powiatów Polski i ich przypisanie do handlowców. Projekt korzysta z Next.js 14 oraz App Routera.
 
 ## Wymagania
 
@@ -27,17 +27,17 @@ npm test       # testy Vitest
 ## Funkcje
 
 - Tryb podglądu pozwala sprawdzać aktualne przypisania regionów.
-- Tooltip po najechaniu lub ustawieniu fokusu pokazuje województwo i przypisanego handlowca.
-- Tryb edycji pozwala wybrać handlowca oraz przypisać go do województwa kliknięciem lub klawiaturą.
+- Tooltip po najechaniu pokazuje powiat, kod TERC i przypisanego handlowca.
+- Tryb edycji pozwala wybrać handlowca oraz przypisać go do powiatu kliknięciem albo przez wyszukiwarkę dostępną z klawiatury.
 - Wejście do edycji wymaga hasła `qwer`; reset przywraca domyślne przypisania.
-- Panel statystyk podaje liczbę województw przypisanych do każdego handlowca.
+- Panel statystyk podaje liczbę powiatów przypisanych do każdego handlowca.
 - Zmiany są przechowywane w `sessionStorage` tylko w bieżącej sesji przeglądarki.
 
 > Hasło `qwer` jest wyłącznie klientową blokadą interfejsu. Nie stanowi uwierzytelniania ani mechanizmu ochrony danych.
 
 ## Dane mapy
 
-GeoJSON z granicami województw jest już częścią projektu: `public/poland-voivodeships.geojson`. Nie trzeba go pobierać ani konfigurować osobno.
+GeoJSON z 380 granicami powiatów jest częścią projektu: `public/poland-counties.geojson`. Funkcje są kluczowane oficjalnym czterocyfrowym kodem TERC, a granice pochodzą z PRG GUGiK i zostały uproszczone do renderowania SVG. Poprzedni plik `public/poland-voivodeships.geojson` pozostaje w repozytorium jako punkt odniesienia.
 
 ## Wdrożenie na Vercel
 
@@ -60,6 +60,7 @@ Nie są wymagane zmienne środowiskowe.
 │   ├── mapLogic.ts
 │   └── mapLogic.test.ts
 ├── public/
+│   ├── poland-counties.geojson
 │   └── poland-voivodeships.geojson
 ├── next.config.js
 ├── package.json

@@ -14,7 +14,8 @@ export type MultiPolygonGeometry = {
 };
 
 export type RegionProperties = {
-  nazwa: string;
+  terc: string;
+  name: string;
 };
 
 export type RegionFeature = {
@@ -36,19 +37,33 @@ const SALESPERSONS: readonly Salesperson[] = [
   'unassigned',
 ];
 
+export const POWIAT_COUNT = 380;
+
 export function validateEditPassword(password: string): boolean {
   return password === EDIT_PASSWORD;
 }
 
 export function assignSalesperson(
   assignments: Assignments,
-  regionName: string,
+  regionId: string,
   salesperson: Salesperson,
 ): Assignments {
   return {
     ...assignments,
-    [regionName]: salesperson,
+    [regionId]: salesperson,
   };
+}
+
+export function createDefaultAssignments(
+  regions: RegionCollection,
+  ownersByVoivodeship: Record<string, Salesperson>,
+): Assignments {
+  return Object.fromEntries(
+    regions.features.map(({ properties }) => [
+      properties.terc,
+      ownersByVoivodeship[properties.terc.slice(0, 2)] ?? 'unassigned',
+    ]),
+  );
 }
 
 function isSalesperson(value: unknown): value is Salesperson {
@@ -101,8 +116,10 @@ function isRegionFeature(value: unknown): value is RegionFeature {
   const { geometry, properties } = value;
   if (
     !isRecord(properties) ||
-    typeof properties.nazwa !== 'string' ||
-    properties.nazwa.length === 0 ||
+    typeof properties.terc !== 'string' ||
+    !/^\d{4}$/.test(properties.terc) ||
+    typeof properties.name !== 'string' ||
+    properties.name.length === 0 ||
     !isRecord(geometry)
   ) {
     return false;
@@ -128,15 +145,19 @@ export function isRegionCollection(
   );
 }
 
+export function hasExpectedPowiatCount(regions: RegionCollection): boolean {
+  return regions.features.length === POWIAT_COUNT;
+}
+
 function normalizeAssignments(
   parsed: Record<string, unknown>,
   fallback: Assignments,
 ): Assignments {
   return Object.fromEntries(
-    Object.entries(fallback).map(([regionName, fallbackOwner]) => {
-      const storedOwner = parsed[regionName];
+    Object.entries(fallback).map(([regionId, fallbackOwner]) => {
+      const storedOwner = parsed[regionId];
       return [
-        regionName,
+        regionId,
         isSalesperson(storedOwner) ? storedOwner : fallbackOwner,
       ];
     }),
