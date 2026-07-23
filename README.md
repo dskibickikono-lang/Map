@@ -1,148 +1,73 @@
-# MapTab - Interaktywna Mapa Polski
+# Mapa Regionów Handlowych KONO
 
-Komponent React do interaktywnego zarządzania przeszłością terytoriów w Polsce. Umożliwia przypisywanie województw do handlowców z wizualizacją na mapie.
+Aplikacja Next.js prezentująca interaktywną mapę województw Polski i ich przypisanie do handlowców. Projekt korzysta z Next.js 14 oraz App Routera.
 
-## 🚀 Szybki Start
+## Wymagania
 
-### 1. Zainstaluj wymagane biblioteki
+- Node.js `>=18.17.0`
+- npm
+
+## Uruchomienie lokalne
 
 ```bash
-npm install d3-geo lucide-react
-npm install -D @types/d3-geo
+npm install
+npm run dev
 ```
 
-### 2. Dodaj plik GeoJSON
+Po uruchomieniu aplikacja jest dostępna pod adresem wyświetlonym przez Next.js (domyślnie `http://localhost:3000`).
 
-Utwórz plik `public/poland-voivodeships.geojson` w swoim projekcie i wklej zawartość z tego linku:
-- [poland-voivodeships.geojson](https://raw.githubusercontent.com/colon-sk/poland-map/main/data/voivodeships.geojson)
+Pozostałe komendy:
 
-**Krok po kroku:**
-1. Kliknij prawym przyciskiem myszy na powyższy link
-2. Wybierz "Zapisz jako..." lub "Save link as..."
-3. Zapisz plik w katalogu `public/` pod nazwą `poland-voivodeships.geojson`
-
-### 3. Skopiuj komponent MapTab
-
-Plik `components/MapTab.tsx` już znajduje się w repozytorium. Możesz go zaimportować w swoim projekcie.
-
-## 📖 Użycie
-
-### Podstawowy import
-
-```tsx
-import { MapTab } from '@/components/MapTab';
-
-export default function App() {
-  return (
-    <div>
-      <MapTab />
-    </div>
-  );
-}
+```bash
+npm run build  # produkcyjny build Next.js
+npm start      # uruchomienie zbudowanej aplikacji
+npm test       # testy Vitest
 ```
 
-### Struktura komponentu
+## Funkcje
 
-```tsx
-export type Salesperson = 'dawid' | 'nikola' | 'magda' | 'unassigned';
+- Tryb podglądu pozwala sprawdzać aktualne przypisania regionów.
+- Tooltip po najechaniu lub ustawieniu fokusu pokazuje województwo i przypisanego handlowca.
+- Tryb edycji pozwala wybrać handlowca oraz przypisać go do województwa kliknięciem lub klawiaturą.
+- Wejście do edycji wymaga hasła `qwer`; reset przywraca domyślne przypisania.
+- Panel statystyk podaje liczbę województw przypisanych do każdego handlowca.
+- Zmiany są przechowywane w `sessionStorage` tylko w bieżącej sesji przeglądarki.
 
-interface Assignment {
-  [voivodeship: string]: Salesperson;
-}
-```
+> Hasło `qwer` jest wyłącznie klientową blokadą interfejsu. Nie stanowi uwierzytelniania ani mechanizmu ochrony danych.
 
-## 🎨 Dostępni Handlowcy
+## Dane mapy
 
-| Imię | Kolor | Opis |
-|------|-------|------|
-| **Dawid** | 🔵 Niebieski (#4A809E) | Iława - Zachodnia i Północna Polska |
-| **Nikola** | 🟠 Pomarańczowy (#C28340) | Iława - Wschodnia i Północno-wschodnia Polska |
-| **Magda** | 🟢 Zielony (#5E9C57) | Oświęcim - Środkowa i Południowa Polska |
-| **Unassigned** | ⚫ Ciemny (#2A2A2A) | Brak przypisania |
+GeoJSON z granicami województw jest już częścią projektu: `public/poland-voivodeships.geojson`. Nie trzeba go pobierać ani konfigurować osobno.
 
-## 🛠️ Funkcjonalności
+## Wdrożenie na Vercel
 
-✅ **Interaktywna mapa** - Kliknij na województwo aby zmienić przypisanie  
-✅ **Wybór handlowca** - Panel boczny do szybkiego wyboru  
-✅ **Tooltip** - Informacje po najechaniu myszą  
-✅ **Statystyki** - Liczba przypisanych województw na handlowca  
-✅ **Persystencja** - Przypisania są zapisane w sessionStorage  
-✅ **Responsywny design** - Dostosowuje się do rozmiaru ekranu  
+1. Zaimportuj repozytorium do Vercel.
+2. Vercel wykryje projekt Next.js na podstawie `vercel.json`.
+3. Pozostaw komendę budowania `npm run build` i wdroż aplikację.
 
-## 🎯 Jak korzystać z mapy
+Nie są wymagane zmienne środowiskowe.
 
-1. **Wybierz handlowca** - Kliknij na imię handlowca w lewym panelu
-2. **Kliknij na województwo** - Na mapie po prawej aby je przypisać
-3. **Podgląd** - Najechaj myszą na województwo aby zobaczyć szczegóły
-4. **Statystyki** - Dolny panel pokazuje ile województw przypisano każdemu handlowcy
+## Struktura projektu
 
-## 📦 Struktura projektu
-
-```
-project-root/
+```text
+.
+├── app/
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx
 ├── components/
-│   └── MapTab.tsx          # Komponent mapy
+│   ├── MapTab.tsx
+│   ├── mapLogic.ts
+│   └── mapLogic.test.ts
 ├── public/
-│   └── poland-voivodeships.geojson  # Dane geograficzne
+│   └── poland-voivodeships.geojson
+├── next.config.js
 ├── package.json
-└── README.md
+├── tailwind.config.ts
+├── tsconfig.json
+└── vercel.json
 ```
 
-## 🔧 Konfiguracja
+## Uwaga o wersji Next.js
 
-Domyślne przypisania województw znajdują się w `DEFAULT_ASSIGNMENTS`:
-
-```tsx
-const DEFAULT_ASSIGNMENTS: Record<string, Salesperson> = {
-  'zachodniopomorskie': 'dawid',
-  'pomorskie': 'dawid',
-  // ... itd
-};
-```
-
-Aby zmienić domyślne przypisania, edytuj tę zmienną w `MapTab.tsx`.
-
-## 💾 Dane sesji
-
-Przypisania są automatycznie zapisywane w `sessionStorage` pod kluczem `apt_calc_map_assignments`. Dane będą zachowane podczas pracy w bieżącej sesji przeglądarki.
-
-## 🎨 Dostosowanie stylów
-
-Komponent używa **Tailwind CSS**. Aby zmienić kolory lub style:
-
-1. Edytuj `SALESPERSON_COLORS` aby zmienić kolory województw
-2. Edytuj `SALESPERSON_NAMES` aby zmienić nazwy handlowców
-3. Modyfikuj klasy Tailwind w JSX aby zmienić wygląd
-
-## 📋 Wymagania
-
-- React 16.8+ (z hooks)
-- Next.js lub inny framework z wsparciem JSX
-- Tailwind CSS
-- d3-geo
-- lucide-react
-
-## 🐛 Troubleshooting
-
-### Mapa się nie ładuje
-- Sprawdź czy plik `public/poland-voivodeships.geojson` istnieje
-- Sprawdź konsolę przeglądarki (F12) czy są błędy
-
-### Brak kolorów
-- Sprawdź czy Tailwind CSS jest poprawnie skonfigurowany
-- Upewnij się że używasz pełnego koloru (np. `bg-[#4A809E]`)
-
-### Przypisania się nie zapisują
-- Sprawdź czy sessionStorage jest dostępny
-- Może być zablokowany przez przeglądarę lub rozszerzenie
-
-## 📄 Licencja
-
-HR Kono Handel - 2026
-
-## 👥 Autorzy
-
-Komponenty opracowane dla: **Kono Handlowcy**
-- Dawid (Iława)
-- Nikola (Iława)
-- Magda (Oświęcim)
+Next.js 14 jest przypięty zgodnie z wymaganiem projektu. Ta linia jest jednak EOL; przed publicznym wdrożeniem produkcyjnym zalecana jest migracja do wspieranej linii Next.js.
